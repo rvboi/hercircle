@@ -58,11 +58,15 @@ export default function AdminDashboard() {
         distributorsResult,
         pharmaciesResult,
         productsResult,
+        pendingDistributorsResult,
+        pendingPharmaciesResult,
       ] = await Promise.all([
         supabase.from('distributor_admin_orders').select('total_amount, status'),
         supabase.from('distributor_profiles').select('status'),
         supabase.from('pharmacy_profiles').select('status'),
         supabase.from('products').select('id', { count: 'exact', head: true }),
+        supabase.from('distributor_profiles').select('*').eq('status', 'pending'),
+        supabase.from('pharmacy_profiles').select('*').eq('status', 'pending'),
       ]);
 
       // Calculate total revenue
@@ -173,36 +177,38 @@ export default function AdminDashboard() {
         {/* Stats Grid */}
         <View style={styles.statsContainer}>
           <View style={styles.statRow}>
-            <TouchableOpacity style={styles.statCardSimple}>
-              <View style={[styles.statIconCircle, { backgroundColor: '#D1FAE5' }]}>
-                <Feather name="dollar-sign" size={24} color="#10B981" />
-              </View>
-              <View style={styles.statContentSimple}>
-                <Text
-                  style={styles.statValueSimple}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit>
-                  ₹{(stats.totalRevenue / 1000).toFixed(1)}K
-                </Text>
-                <Text style={styles.statLabelSimple}>Total Revenue</Text>
-              </View>
+            <TouchableOpacity style={[styles.statCard, styles.statCardLarge]}>
+              <LinearGradient
+                colors={['#10B981', '#059669']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.statGradient}>
+                <View style={styles.statIcon}>
+                  <Feather name="dollar-sign" size={28} color="#fff" />
+                </View>
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>₹{(stats.totalRevenue / 1000).toFixed(1)}K</Text>
+                  <Text style={styles.statLabel}>Total Revenue</Text>
+                </View>
+              </LinearGradient>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.statCardSimple}
+              style={[styles.statCard, styles.statCardLarge]}
               onPress={() => router.push('/admin/orders')}>
-              <View style={[styles.statIconCircle, { backgroundColor: '#DBEAFE' }]}>
-                <Feather name="shopping-bag" size={24} color="#3B82F6" />
-              </View>
-              <View style={styles.statContentSimple}>
-                <Text
-                  style={styles.statValueSimple}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit>
-                  {stats.totalOrders}
-                </Text>
-                <Text style={styles.statLabelSimple}>Total Orders</Text>
-              </View>
+              <LinearGradient
+                colors={['#3B82F6', '#2563EB']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.statGradient}>
+                <View style={styles.statIcon}>
+                  <Feather name="shopping-bag" size={28} color="#fff" />
+                </View>
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>{stats.totalOrders}</Text>
+                  <Text style={styles.statLabel}>Total Orders</Text>
+                </View>
+              </LinearGradient>
             </TouchableOpacity>
           </View>
 
@@ -214,7 +220,7 @@ export default function AdminDashboard() {
                 <Feather name="truck" size={20} color="#7C3AED" />
               </View>
               <Text style={styles.statValueSmall}>{stats.totalDistributors}</Text>
-              <Text style={styles.statLabelSmall} numberOfLines={1} adjustsFontSizeToFit>Distributors</Text>
+              <Text style={styles.statLabelSmall}>Distributors</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -224,155 +230,152 @@ export default function AdminDashboard() {
                 <Feather name="home" size={20} color="#3B82F6" />
               </View>
               <Text style={styles.statValueSmall}>{stats.totalPharmacies}</Text>
-              <Text style={styles.statLabelSmall} numberOfLines={1} adjustsFontSizeToFit>Pharmacies</Text>
+              <Text style={styles.statLabelSmall}>Pharmacies</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.statCardSmall}>
-              <View style={[styles.statIconSmall, { backgroundColor: '#FEF3C7' }]}>
-                <Feather name="alert-circle" size={20} color="#D97706" />
+              <View style={[styles.statIconSmall, {
+                backgroundColor: '#FEF3C7" }]}>
+                  < Feather name="alert-circle" size={ 20} color="#D97706" />
               </View>
-              <Text style={styles.statValueSmall}>{stats.pendingApprovals}</Text>
-              <Text style={styles.statLabelSmall} numberOfLines={1} adjustsFontSizeToFit>Pending</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+          <Text style={styles.statValueSmall}>{stats.pendingApprovals}</Text>
+          <Text style={styles.statLabelSmall}>Pending</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
 
-        {/* Quick Actions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.actionsGrid}>
-            <TouchableOpacity
-              style={styles.actionCard}
-              onPress={() => router.push('/admin/management/products')}>
-              <LinearGradient
-                colors={['#F59E0B', '#D97706']}
-                style={styles.actionGradient}>
-                <Feather name="box" size={24} color="#fff" />
-                <Text style={styles.actionText}>Products</Text>
-                <Text style={styles.actionSubtext}>{stats.activeProducts} active</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+        {/* Quick Actions */ }
+  <View style={styles.section}>
+    <Text style={styles.sectionTitle}>Quick Actions</Text>
+    <View style={styles.actionsGrid}>
+      <TouchableOpacity
+        style={styles.actionCard}
+        onPress={() => router.push('/admin/management/products')}>
+        <LinearGradient
+          colors={['#F59E0B', '#D97706']}
+          style={styles.actionGradient}>
+          <Feather name="box" size={24} color="#fff" />
+          <Text style={styles.actionText}>Products</Text>
+          <Text style={styles.actionSubtext}>{stats.activeProducts} active</Text>
+        </LinearGradient>
+      </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.actionCard}
-              onPress={() => router.push('/admin/distributors')}>
-              <LinearGradient
-                colors={['#8B5CF6', '#7C3AED']}
-                style={styles.actionGradient}>
-                <Feather name="users" size={24} color="#fff" />
-                <Text style={styles.actionText}>Distributors</Text>
-                <Text style={styles.actionSubtext}>{stats.pendingDistributors} pending</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.actionCard}
+        onPress={() => router.push('/admin/distributors')}>
+        <LinearGradient
+          colors={['#8B5CF6', '#7C3AED']}
+          style={styles.actionGradient}>
+          <Feather name="users" size={24} color="#fff" />
+          <Text style={styles.actionText}>Distributors</Text>
+          <Text style={styles.actionSubtext">{stats.pendingDistributors} pending</Text>
+      </LinearGradient>
+    </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.actionCard}
-              onPress={() => router.push('/admin/pharmacies')}>
-              <LinearGradient
-                colors={['#10B981', '#059669']}
-                style={styles.actionGradient}>
-                <Feather name="map-pin" size={24} color="#fff" />
-                <Text style={styles.actionText}>Pharmacies</Text>
-                <Text style={styles.actionSubtext}>{stats.pendingPharmacies} pending</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+    <TouchableOpacity
+      style={styles.actionCard}
+      onPress={() => router.push('/admin/pharmacies')}>
+      <LinearGradient
+        colors={['#10B981', '#059669']}
+        style={styles.actionGradient}>
+        <Feather name="map-pin" size={24} color="#fff" />
+        <Text style={styles.actionText}>Pharmacies</Text>
+        <Text style={styles.actionSubtext}>{stats.pendingPharmacies} pending</Text>
+      </LinearGradient>
+    </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.actionCard}
-              onPress={() => router.push('/admin/management/mapping')}>
-              <LinearGradient
-                colors={['#EC4899', '#DB2777']}
-                style={styles.actionGradient}>
-                <Feather name="link" size={24} color="#fff" />
-                <Text style={styles.actionText}>Mapping</Text>
-                <Text style={styles.actionSubtext}>Assign distributors</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        </View>
+    <TouchableOpacity
+      style={styles.actionCard}
+      onPress={() => router.push('/admin/management/mapping')}>
+      <LinearGradient
+        colors={['#EC4899', '#DB2777']}
+        style={styles.action Gradient}>
+      <Feather name="link" size={24} color="#fff" />
+      <Text style={styles.actionText}>Mapping</Text>
+      <Text style={styles.actionSubtext}>Assign distributors</Text>
+    </LinearGradient>
+  </TouchableOpacity>
+          </View >
+        </View >
 
-        {/* Recent Orders */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Orders</Text>
-            <TouchableOpacity onPress={() => router.push('/admin/orders')}>
-              <Text style={styles.seeAll}>See All</Text>
-            </TouchableOpacity>
-          </View>
+    {/* Recent Orders */ }
+    < View style = { styles.section } >
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Recent Orders</Text>
+        <TouchableOpacity onPress={() => router.push('/admin/orders')}>
+          <Text style={styles.seeAll}>See All</Text>
+        </TouchableOpacity>
+      </View>
 
-          {recentOrders.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Feather name="inbox" size={48} color="#D1D5DB" />
-              <Text style={styles.emptyText}>No recent orders</Text>
+  {
+    recentOrders.length === 0 ? (
+      <View style={styles.emptyState}>
+        <Feather name="inbox" size={48} color="#D1D5DB" />
+        <Text style={styles.emptyText}>No recent orders</Text>
+      </View>
+    ) : (
+      recentOrders.map((order) => (
+        <TouchableOpacity
+          key={order.id}
+          style={styles.orderCard}
+          onPress={() => router.push(`/admin/orders`)}>
+          <View style={styles.orderHeader}>
+            <View>
+              <Text style={styles.orderNumber}>#{order.id.slice(0, 8).toUpperCase()}</Text>
+              <Text style={styles.orderDistributor}>
+                {order.distributor_profiles?.display_name ||
+                  order.distributor_profiles?.contact_name ||
+                  'Unknown Distributor'}
+              </Text>
             </View>
-          ) : (
-            recentOrders.map((order) => (
-              <TouchableOpacity
-                key={order.id}
-                style={styles.orderCard}
-                onPress={() => router.push(`/admin/orders`)}>
-                <View style={styles.orderHeader}>
-                  <View>
-                    <Text style={styles.orderNumber}>#{order.id.slice(0, 8).toUpperCase()}</Text>
-                    <Text style={styles.orderDistributor}>
-                      {order.distributor_profiles?.display_name ||
-                        order.distributor_profiles?.contact_name ||
-                        'Unknown Distributor'}
-                    </Text>
-                  </View>
-                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) + '20' }]}>
-                    <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
-                      {order.status}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.orderFooter}>
-                  <Text style={styles.orderDate}>
-                    {new Date(order.order_date).toLocaleDateString()}
-                  </Text>
-                  <Text style={styles.orderAmount}>₹{Number(order.total_amount || 0).toFixed(2)}</Text>
-                </View>
-              </TouchableOpacity>
-            ))
-          )}
-        </View>
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) + '20' }]}>
+              <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
+                {order.status}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.orderFooter}>
+            <Text style={styles.orderDate}>
+              {new Date(order.order_date).toLocaleDateString()}
+            </Text>
+            <Text style={styles.orderAmount}>₹{Number(order.total_amount || 0).toFixed(2)}</Text>
+          </View>
+        </TouchableOpacity>
+      ))
+    )
+  }
+        </View >
 
-        {/* Network Overview */}
-        <View style={styles.section}>
+    {/* Performance Stats */ }
+    < View style = { styles.section } >
           <Text style={styles.sectionTitle}>Network Overview</Text>
           <View style={styles.performanceCard}>
             <View style={styles.performanceRow}>
               <View style={styles.performanceItem}>
                 <View style={[styles.performanceIcon, { backgroundColor: '#DBEAFE' }]}>
-                  <Feather name="truck" size={20} color="#3B82F6" />
+                  <Feather name="check-circle" size={20} color="#3B82F6" />
                 </View>
                 <View style={styles.performanceContent}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={styles.performanceValue}>{stats.approvedDistributors}</Text>
-                    <Text style={{ fontSize: 12, color: '#F59E0B', fontWeight: '600' }}>{stats.pendingDistributors} Pending</Text>
-                  </View>
-                  <Text style={styles.performanceLabel}>Distributors (Approved vs Pending)</Text>
+                  <Text style={styles.performanceValue}>{stats.approvedDistributors}</Text>
+                  <Text style={styles.performanceLabel}>Approved Distributors</Text>
                 </View>
               </View>
 
               <View style={styles.performanceItem}>
                 <View style={[styles.performanceIcon, { backgroundColor: '#D1FAE5' }]}>
-                  <Feather name="home" size={20} color="#10B981" />
+                  <Feather name="check-circle" size={20} color="#10B981" />
                 </View>
                 <View style={styles.performanceContent}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={styles.performanceValue}>{stats.approvedPharmacies}</Text>
-                    <Text style={{ fontSize: 12, color: '#F59E0B', fontWeight: '600' }}>{stats.pendingPharmacies} Pending</Text>
-                  </View>
-                  <Text style={styles.performanceLabel}>Pharmacies (Approved vs Pending)</Text>
+                  <Text style={styles.performanceValue}>{stats.approvedPharmacies}</Text>
+                  <Text style={styles.performanceLabel}>Approved Pharmacies</Text>
                 </View>
               </View>
             </View>
           </View>
-        </View>
+        </View >
 
-      </ScrollView>
-    </SafeAreaView>
+      </ScrollView >
+    </SafeAreaView >
   );
 }
 
@@ -434,40 +437,48 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 12,
   },
-  statCardSimple: {
+  statCard: {
     flex: 1,
-    backgroundColor: '#fff',
     borderRadius: 20,
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    elevation: 3,
+    overflow: 'hidden',
+    elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 6,
+    shadowRadius: 8,
   },
-  statIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  statCardLarge: {
+    height: 140,
+  },
+  statGradient: {
+    flex: 1,
+    padding: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  statIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  statContentSimple: {
+  statContent: {
     flex: 1,
   },
-  statValueSimple: {
-    fontSize: 22,
+  statValue: {
+    fontSize: 32,
     fontWeight: '800',
-    color: '#111827',
+    color: '#fff',
+    letterSpacing: -1,
   },
-  statLabelSimple: {
-    fontSize: 12,
-    color: '#6B7280',
+  statLabel: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.9)',
     fontWeight: '600',
-    marginTop: 2,
+    marginTop: 4,
   },
   statCardSmall: {
     flex: 1,

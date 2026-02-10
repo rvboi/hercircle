@@ -1,115 +1,113 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '@/context/AuthContext';
+import { supabase } from '@/lib/supabase';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-
-// Simple in-device dynamic store keys
-const ORDERS_KEY = 'distributor_orders_to_admin';
-
-interface OrderItem {
-  id: string;
-  name: string;
-  qty: number;
-  notes?: string;
-}
+import React, { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Modal,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 interface AdminOrder {
   id: string;
-  createdAt: number;
-  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Fulfilled';
-  items: OrderItem[];
+  created_at: string;
+  status: string;
+  total_amount: number;
+  delivery_otp?: string;
 }
 
-async function loadOrders(): Promise<AdminOrder[]> {
-  const raw = await AsyncStorage.getItem(ORDERS_KEY);
-  return raw ? JSON.parse(raw) : [];
+interface OrderItem {
+  id: string;
+  quantity: number;
+  price: number;
+  products: {
+    name: string;
+    sku: string;
+    image_url?: string;
+  };
 }
 
-async function saveOrders(orders: AdminOrder[]) {
-  await AsyncStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
-}
-
-function newOrder(): AdminOrder {
-  return { id: `AO-${Date.now()}`, createdAt: Date.now(), status: 'Draft', items: [] };
-}
-
-export default function OrdersToAdmin() {
+export default function AdminOrdersStatus() {
+  const { auth } = useAuth();
   const router = useRouter();
   const [orders, setOrders] = useState<AdminOrder[]>([]);
-  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [itemName, setItemName] = useState('');
-  const [itemQty, setItemQty] = useState('1');
+  const [loading, setLoading] = useState(true);
+  const [selectedOrder, setSelectedOrder] = useState<AdminOrder | null>(null);
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [loadingItems, setLoadingItems] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      const stored = await loadOrders();
-      if (stored.length === 0) {
-        const initial = [newOrder()];
-        setOrders(initial);
-        setActiveOrderId(initial[0].id);
-        await saveOrders(initial);
-      } else {
-        setOrders(stored);
-        setActiveOrderId(stored[0]?.id || null);
-      }
-    })();
-  }, []);
+    if (auth?.id) fetchOrders();
+  }, [auth]);
 
-  const activeOrder = useMemo(() => orders.find(o => o.id === activeOrderId) || null, [orders, activeOrderId]);
+  const fetchOrders = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('distributor_admin_orders')
+        .select('*')
+        .eq('distributor_id', auth?.id)
+        .order('created_at', { ascending: false });
 
-  const filteredItems = useMemo(() => {
-    if (!activeOrder) return [];
-    if (!search) return activeOrder.items;
-    const s = search.toLowerCase();
-    return activeOrder.items.filter(i => i.name.toLowerCase().includes(s));
-  }, [activeOrder, search]);
-
-  const addOrder = async () => {
-    const o = newOrder();
-    const next = [o, ...orders];
-    setOrders(next);
-    setActiveOrderId(o.id);
-    await saveOrders(next);
-  };
-
-  const addItem = async () => {
-    if (!activeOrder) return;
-    const qty = Math.max(1, parseInt(itemQty || '1', 10) || 1);
-    if (!itemName.trim()) return;
-    const item: OrderItem = { id: `${Date.now()}`, name: itemName.trim(), qty };
-    const next = orders.map(o => o.id === activeOrder.id ? { ...o, items: [item, ...o.items] } : o);
-    setOrders(next);
-    await saveOrders(next);
-    setItemName('');
-    setItemQty('1');
-  };
-
-  const submitOrder = async () => {
-    if (!activeOrder) return;
-    if (activeOrder.items.length === 0) {
-      Alert.alert('Empty order', 'Add at least one item before submitting.');
-      return;
+      if (error) throw error;
+      setOrders(data || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
     }
-    const next = orders.map(o => o.id === activeOrder.id ? { ...o, status: 'Submitted' } : o);
-    setOrders(next);
-    await saveOrders(next);
-    Alert.alert('Order submitted', 'Your order was submitted to Admin.');
   };
 
-  const updateStatus = async (status: AdminOrder['status']) => {
-    if (!activeOrder) return;
-    const next = orders.map(o => o.id === activeOrder.id ? { ...o, status } : o);
-    setOrders(next);
-    await saveOrders(next);
+  const fetchOrderItems = async (orderId: string) => {
+    try {
+      setLoadingItems(true);
+      const { data, error } = await supabase
+        .from('distributor_admin_order_items')
+        .select(`
+          id,
+          quantity,
+          price,
+          products (
+            name,
+            sku,
+            image_url
+          )
+        `)
+        .eq('order_id', orderId);
+
+      if (error) throw error;
+      // @ts-ignore
+      setOrderItems(data || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingItems(false);
+    }
   };
 
-  const removeItem = async (id: string) => {
-    if (!activeOrder) return;
-    const next = orders.map(o => o.id === activeOrder.id ? { ...o, items: o.items.filter(i => i.id !== id) } : o);
-    setOrders(next);
-    await saveOrders(next);
+  const handleOrderPress = (order: AdminOrder) => {
+    setSelectedOrder(order);
+    fetchOrderItems(order.id);
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'pending': return '#F59E0B';
+      case 'approved':
+      case 'confirmed': return '#10B981';
+      case 'rejected':
+      case 'cancelled': return '#EF4444';
+      case 'fulfilled':
+      case 'delivered': return '#3B82F6';
+      default: return '#6B7280';
+    }
   };
 
   return (
@@ -118,111 +116,210 @@ export default function OrdersToAdmin() {
         <TouchableOpacity onPress={() => router.back()}>
           <Feather name="chevron-left" size={24} color="#111827" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Orders to Admin</Text>
-        <TouchableOpacity onPress={addOrder}>
-          <Feather name="plus" size={24} color="#111827" />
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Admin Orders</Text>
+        <View style={{ width: 24 }} />
       </View>
 
-      {/* Orders Switcher */}
-      <FlatList
-        horizontal
-        data={orders}
-        keyExtractor={o => o.id}
-        contentContainerStyle={styles.orderTabs}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.orderTab, activeOrderId === item.id && styles.orderTabActive]}
-            onPress={() => setActiveOrderId(item.id)}
-          >
-            <Text style={[styles.orderTabText, activeOrderId === item.id && styles.orderTabTextActive]}
-            >{item.id} · {item.status}</Text>
-          </TouchableOpacity>
-        )}
-      />
-
-      {/* Item adder */}
-      <View style={styles.itemAdder}>
-        <TextInput
-          style={styles.input}
-          placeholder="Medicine/Product name"
-          value={itemName}
-          onChangeText={setItemName}
-        />
-        <TextInput
-          style={[styles.input, { width: 80 }]}
-          placeholder="Qty"
-          keyboardType="number-pad"
-          value={itemQty}
-          onChangeText={setItemQty}
-        />
-        <TouchableOpacity style={styles.addBtn} onPress={addItem}>
-          <Feather name="plus" size={18} color="#fff" />
-          <Text style={styles.addBtnText}>Add</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Search */}
-      <View style={styles.searchRow}>
-        <Feather name="search" size={18} color="#6B7280" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search items in this order"
-          value={search}
-          onChangeText={setSearch}
-        />
-      </View>
-
-      {/* Items list */}
-      <FlatList
-        data={filteredItems}
-        keyExtractor={i => i.id}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
-        renderItem={({ item }) => (
-          <View style={styles.itemRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.itemName}>{item.name}</Text>
-              <Text style={styles.itemMeta}>Qty: {item.qty}</Text>
+      {loading ? (
+        <ActivityIndicator size="large" color="#059669" style={{ marginTop: 20 }} />
+      ) : (
+        <FlatList
+          data={orders}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.list}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>No orders placed yet.</Text>
             </View>
-            <TouchableOpacity onPress={() => removeItem(item.id)}>
-              <Feather name="trash-2" size={18} color="#EF4444" />
+          }
+          renderItem={({ item }) => (
+            <TouchableOpacity style={styles.card} onPress={() => handleOrderPress(item)}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.orderId}>Order #{item.id.slice(0, 8)}</Text>
+                <View style={[styles.badge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
+                  <Text style={[styles.badgeText, { color: getStatusColor(item.status) }]}>{item.status}</Text>
+                </View>
+              </View>
+              <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
+              <Text style={styles.amount}>Total: ${item.total_amount.toFixed(2)}</Text>
+            </TouchableOpacity>
+          )}
+        />
+      )}
+
+      <Modal visible={!!selectedOrder} animationType="slide" presentationStyle="pageSheet">
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Order Details</Text>
+            <TouchableOpacity onPress={() => setSelectedOrder(null)} style={styles.closeBtn}>
+              <Feather name="x" size={24} color="#111827" />
             </TouchableOpacity>
           </View>
-        )}
-      />
 
-      {/* Footer actions */}
-      <View style={styles.footer}>
-        <TouchableOpacity style={[styles.statusBtn, { backgroundColor: '#FBBF24' }]} onPress={() => updateStatus('Draft')}>
-          <Text style={styles.statusBtnText}>Mark Draft</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.statusBtn, { backgroundColor: '#60A5FA' }]} onPress={submitOrder}>
-          <Text style={styles.statusBtnText}>Submit</Text>
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
+          {selectedOrder && (
+            <View style={styles.orderDetails}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Order ID:</Text>
+                <Text style={styles.detailValue}>#{selectedOrder.id.slice(0, 8)}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Date:</Text>
+                <Text style={styles.detailValue}>{new Date(selectedOrder.created_at).toLocaleString()}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Status:</Text>
+                <Text style={[styles.detailValue, { color: getStatusColor(selectedOrder.status), fontWeight: '700' }]}>
+                  {selectedOrder.status}
+                </Text>
+              </View>
+              {/* @ts-ignore */}
+              {selectedOrder.delivery_otp && (selectedOrder.status.toLowerCase() === 'confirmed' || selectedOrder.status.toLowerCase() === 'processing') && (
+                <View style={styles.otpContainer}>
+                  <Text style={styles.otpLabel}>Delivery OTP:</Text>
+                  <Text style={styles.otpValue}>{selectedOrder.delivery_otp}</Text>
+                  <Text style={styles.otpNote}>Share this code with the Admin for delivery.</Text>
+                </View>
+              )}
+            </View>
+
+          )}
+
+          <View style={styles.divider} />
+
+          {loadingItems ? (
+            <ActivityIndicator size="large" color="#059669" style={{ marginTop: 40 }} />
+          ) : (
+            <FlatList
+              data={orderItems}
+              keyExtractor={item => item.id}
+              contentContainerStyle={styles.itemsList}
+              renderItem={({ item }) => (
+                <View style={styles.itemCard}>
+                  {item.products?.image_url ? (
+                    <Image source={{ uri: item.products.image_url }} style={styles.itemImage} />
+                  ) : (
+                    <View style={styles.placeholderImage}>
+                      <Feather name="image" size={20} color="#9CA3AF" />
+                    </View>
+                  )}
+                  <View style={styles.itemInfo}>
+                    <Text style={styles.itemName}>{item.products?.name}</Text>
+                    <Text style={styles.itemSku}>SKU: {item.products?.sku}</Text>
+                    <View style={styles.itemMeta}>
+                      <Text style={styles.itemQty}>x{item.quantity}</Text>
+                      <Text style={styles.itemPrice}>${item.price.toFixed(2)}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.itemTotal}>${(item.quantity * item.price).toFixed(2)}</Text>
+                </View>
+              )}
+            />
+          )}
+
+          {selectedOrder && (
+            <View style={styles.footer}>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Grand Total</Text>
+                <Text style={styles.totalValue}>${selectedOrder.total_amount.toFixed(2)}</Text>
+              </View>
+            </View>
+          )}
+        </View>
+      </Modal>
+    </SafeAreaView >
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { paddingTop: 50, paddingBottom: 16, paddingHorizontal: 16, backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  header: {
+    paddingTop: 50,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
   headerTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
-  orderTabs: { paddingHorizontal: 12, paddingVertical: 12, gap: 8 },
-  orderTab: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', marginRight: 8 },
-  orderTabActive: { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' },
-  orderTabText: { color: '#374151', fontWeight: '600' },
-  orderTabTextActive: { color: '#4F46E5' },
-  itemAdder: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, marginBottom: 8 },
-  input: { flex: 1, height: 44, backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', paddingHorizontal: 12 },
-  addBtn: { height: 44, borderRadius: 10, backgroundColor: '#4F46E5', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, flexDirection: 'row', gap: 6 },
-  addBtnText: { color: '#fff', fontWeight: '700' },
-  searchRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', marginHorizontal: 16, paddingHorizontal: 10, marginBottom: 8 },
-  searchInput: { flex: 1, height: 44, paddingHorizontal: 8 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', padding: 12, marginTop: 8 },
-  itemName: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  itemMeta: { fontSize: 12, color: '#6B7280', marginTop: 4 },
-  footer: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB', backgroundColor: '#fff' },
-  statusBtn: { flex: 1, marginHorizontal: 6, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  statusBtnText: { color: '#fff', fontWeight: '800' },
+  list: { padding: 16, gap: 12 },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.03,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  orderId: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  badgeText: { fontSize: 12, fontWeight: '700' },
+  date: { fontSize: 14, color: '#6B7280', marginBottom: 4 },
+  amount: { fontSize: 16, fontWeight: '700', color: '#059669' },
+  emptyState: { alignItems: 'center', marginTop: 40 },
+  emptyText: { color: '#9CA3AF', fontSize: 16 },
+
+  // Modal Styles
+  modalContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  modalHeader: {
+    padding: 20,
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
+  closeBtn: { padding: 4 },
+  orderDetails: { padding: 20, backgroundColor: '#fff' },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  detailLabel: { fontSize: 14, color: '#6B7280' },
+  detailValue: { fontSize: 14, color: '#111827', fontWeight: '500' },
+  divider: { height: 1, backgroundColor: '#E5E7EB' },
+  itemsList: { padding: 16, gap: 12 },
+  itemCard: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+  },
+  itemImage: { width: 48, height: 48, borderRadius: 8, marginRight: 12 },
+  placeholderImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  itemInfo: { flex: 1 },
+  itemName: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  itemSku: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  itemMeta: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  itemQty: { fontSize: 12, fontWeight: '600', color: '#4B5563' },
+  itemPrice: { fontSize: 12, color: '#6B7280' },
+  itemTotal: { fontSize: 14, fontWeight: '700', color: '#111827' },
+  footer: {
+    padding: 20,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    paddingBottom: 40,
+  },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  totalLabel: { fontSize: 16, fontWeight: '600', color: '#111827' },
+  totalValue: { fontSize: 20, fontWeight: '800', color: '#059669' },
+  otpContainer: { marginTop: 12, padding: 12, backgroundColor: '#EFF6FF', borderRadius: 8, borderColor: '#BFDBFE', borderWidth: 1 },
+  otpLabel: { fontSize: 13, color: '#1E40AF', fontWeight: '600' },
+  otpValue: { fontSize: 24, fontWeight: 'bold', color: '#1E3A8A', marginVertical: 4, letterSpacing: 4 },
+  otpNote: { fontSize: 12, color: '#60A5FA' },
 });

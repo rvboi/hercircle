@@ -1,30 +1,20 @@
+import { useAuth } from '@/context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { ActivityIndicator, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function PharmacyIndex() {
-  const [checking, setChecking] = useState(true);
+  const { auth, loading } = useAuth();
 
   useEffect(() => {
-    (async () => {
-      try {
-        const authRaw = await AsyncStorage.getItem('pharmacy_auth');
-        const auth = authRaw ? JSON.parse(authRaw) : null;
-        const stores = JSON.parse((await AsyncStorage.getItem('pharmacy_stores')) || '[]');
-        const found = stores.find((s: any) => s.id === auth?.storeId);
-        if (found) {
-          router.replace('/pharmacy/dashboard');
-          return;
-        }
-      } catch {}
-      setChecking(false);
-    })();
-  }, []);
+    if (!loading && auth?.role === 'pharmacy') {
+      router.replace('/pharmacy/dashboard');
+    }
+  }, [auth, loading]);
 
-  if (checking) {
+  if (loading) {
     return (
       <SafeAreaView style={styles.loadingWrap}>
         <ActivityIndicator size="large" color="#7C3AED" />
@@ -45,14 +35,14 @@ export default function PharmacyIndex() {
       </LinearGradient>
 
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.primaryBtn} onPress={() => router.push('/pharmacy/login')}>
+        <TouchableOpacity style={styles.primaryBtn} onPress={() => router.push('/(auth)/supplier-login')}>
           <LinearGradient colors={["#7C3AED", "#3B82F6"]} style={styles.primaryGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
             <Ionicons name="log-in-outline" size={18} color="#fff" />
             <Text style={styles.primaryText}>Sign In</Text>
           </LinearGradient>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.push('/pharmacy/signup')}>
+        <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.push('/(auth)/supplier-signup')}>
           <Ionicons name="storefront" size={18} color="#111827" />
           <Text style={styles.secondaryText}>Create Account</Text>
         </TouchableOpacity>

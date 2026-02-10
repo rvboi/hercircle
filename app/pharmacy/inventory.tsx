@@ -1,173 +1,193 @@
-import React, { useEffect, useState } from 'react';
-import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, TextInput, Alert } from 'react-native';
+import { useAuth } from '@/context/AuthContext';
+import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import * as RN from 'react-native';
 
-interface Product {
+interface InventoryItem {
   id: string;
-  name: string;
-  sku: string;
-  price: number;
-  stock: number;
-  reorderLevel: number;
-  category: string;
+  pharmacy_id: string;
+  product_id: string;
+  stock_quantity: number;
+  reorder_level: number;
+  products: {
+    name: string;
+    sku: string;
+  };
 }
 
 export default function InventoryScreen() {
-  const [store, setStore] = useState<any>(null);
-  const [products, setProducts] = useState<Product[]>([]);
+  const { auth } = useAuth();
+  const router = useRouter();
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
-  const [editing, setEditing] = useState<Product | null>(null);
-  const [form, setForm] = useState<Partial<Product>>({});
+  const [editing, setEditing] = useState<InventoryItem | null>(null);
+  const [form, setForm] = useState({
+    stock_quantity: '0',
+    reorder_level: '10',
+  });
 
   useEffect(() => {
-    load();
-  }, []);
+    if (auth?.id) {
+      fetchData();
+    }
+  }, [auth]);
 
-  const seedInventory = (): Product[] => {
-    return [
-      { id: Date.now().toString() + '-1', name: 'Paracetamol 500mg', sku: 'PARA500', price: 2.49, stock: 120, reorderLevel: 20, category: 'Analgesic' },
-      { id: Date.now().toString() + '-2', name: 'Ibuprofen 200mg', sku: 'IBU200', price: 3.99, stock: 60, reorderLevel: 15, category: 'NSAID' },
-      { id: Date.now().toString() + '-3', name: 'Cough Syrup 100ml', sku: 'COUGH100', price: 5.5, stock: 25, reorderLevel: 10, category: 'Cold & Flu' },
-      { id: Date.now().toString() + '-4', name: 'Antacid Tablets', sku: 'ANTACID', price: 4.25, stock: 0, reorderLevel: 10, category: 'Digestive' },
-      { id: Date.now().toString() + '-5', name: 'Vitamin C 1000mg', sku: 'VITC1000', price: 8.0, stock: 200, reorderLevel: 30, category: 'Supplements' },
-    ];
-  };
-
-  const load = async () => {
-    const auth = JSON.parse((await AsyncStorage.getItem('pharmacy_auth')) || 'null');
-    const stores = JSON.parse((await AsyncStorage.getItem('pharmacy_stores')) || '[]');
-    const s = stores.find((x: any) => x.id === auth?.storeId);
-    if (!s) return;
-    if (!s.inventory || s.inventory.length === 0) {
-      const seeded = seedInventory();
-      s.inventory = seeded;
-      const idx = stores.findIndex((x: any) => x.id === s.id);
-      stores[idx] = s;
-      await AsyncStorage.setItem('pharmacy_stores', JSON.stringify(stores));
-      setStore(s);
-      setProducts(seeded);
+  const fetchData = async () => {
+    if (!auth?.id || auth.id === 'undefined') {
+      console.warn('fetchData called without valid auth.id');
       return;
     }
-    setStore(s);
-    setProducts(s.inventory || []);
-  };
+    try {
+      setLoading(true);
+      const { data: invData, error: invError } = await supabase
+        .from('pharmacy_inventory')
+        .select(`
+          *,
+          products (
+            name,
+            sku,
+            price
+          )
+        `)
+        .eq('pharmacy_id', auth.id)
+        .order('created_at', { ascending: false });
 
-  const save = async (updatedProducts: Product[]) => {
-    const stores = JSON.parse((await AsyncStorage.getItem('pharmacy_stores')) || '[]');
-    const idx = stores.findIndex((x: any) => x.id === store.id);
-    if (idx >= 0) {
-      stores[idx].inventory = updatedProducts;
-      await AsyncStorage.setItem('pharmacy_stores', JSON.stringify(stores));
-      setProducts(updatedProducts);
+      if (invError) throw invError;
+      setInventory(invData || []);
+    } catch (e) {
+      console.error(e);
+      RN.Alert.alert('Error', 'Failed to fetch inventory data.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const openNew = () => {
-    setEditing(null);
-    setForm({ name: '', sku: '', price: 0, stock: 0, reorderLevel: 5, category: '' });
-    setModalVisible(true);
-  };
-
-  const openEdit = (p: Product) => {
-    setEditing(p);
-    setForm(p);
+  const openEdit = (item: InventoryItem) => {
+    setEditing(item);
+    setForm({
+      stock_quantity: String(item.stock_quantity),
+      reorder_level: String(item.reorder_level),
+    });
     setModalVisible(true);
   };
 
   const remove = (id: string) => {
-    Alert.alert('Delete Product', 'Are you sure?', [
+    RN.Alert.alert('Delete Item', 'Are you sure you want to remove this from your inventory?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        const updated = products.filter(p => p.id !== id);
-        await save(updated);
-      } }
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            const { error } = await supabase
+              .from('pharmacy_inventory')
+              .delete()
+              .eq('id', id);
+            if (error) throw error;
+            setInventory(inventory.filter(p => p.id !== id));
+          } catch (e) {
+            console.error(e);
+            RN.Alert.alert('Error', 'Failed to delete item.');
+          }
+        }
+      }
     ]);
   };
 
-  const submit = async () => {
-    if (!form.name || !form.sku) {
-      Alert.alert('Missing info', 'Please provide product name and SKU.');
-      return;
+  const submitEdit = async () => {
+    if (!editing || !auth?.id) return;
+    try {
+      const payload = {
+        stock_quantity: parseInt(form.stock_quantity) || 0,
+        reorder_level: parseInt(form.reorder_level) || 0,
+      };
+
+      const { error } = await supabase
+        .from('pharmacy_inventory')
+        .update(payload)
+        .eq('id', editing.id);
+
+      if (error) throw error;
+      fetchData();
+      setModalVisible(false);
+    } catch (e) {
+      console.error(e);
+      RN.Alert.alert('Error', 'Failed to update inventory item.');
     }
-    const updated = [...products];
-    if (editing) {
-      const idx = updated.findIndex(p => p.id === editing.id);
-      if (idx >= 0) updated[idx] = { ...(editing as Product), ...(form as Product) } as Product;
-    } else {
-      updated.unshift({
-        id: Date.now().toString(),
-        name: form.name as string,
-        sku: form.sku as string,
-        price: Number(form.price || 0),
-        stock: Number(form.stock || 0),
-        reorderLevel: Number(form.reorderLevel || 5),
-        category: (form.category as string) || 'General',
-      });
-    }
-    await save(updated);
-    setModalVisible(false);
   };
 
-  const Item = ({ item }: { item: Product }) => (
-    <View style={styles.item}>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.itemName}>{item.name}</Text>
-        <Text style={styles.itemMeta}>SKU {item.sku} • {item.category}</Text>
-        <Text style={styles.itemMeta}>${item.price.toFixed(2)} • Stock {item.stock}</Text>
-      </View>
-      <TouchableOpacity style={styles.iconBtn} onPress={() => openEdit(item)}>
+  const Item = ({ item }: { item: InventoryItem }) => (
+    <RN.View style={styles.item}>
+      <RN.View style={{ flex: 1 }}>
+        <RN.Text style={styles.itemName}>{item.products?.name || 'Unknown Product'}</RN.Text>
+        <RN.Text style={styles.itemMeta}>SKU {item.products?.sku || '-'}</RN.Text>
+        <RN.Text style={styles.itemMeta}>Cost: ₹{(item.products?.price || 0).toLocaleString()} · Stock: {item.stock_quantity} (Min: {item.reorder_level})</RN.Text>
+        {item.stock_quantity <= item.reorder_level && (
+          <RN.Text style={styles.lowStock}>Low Stock Alert!</RN.Text>
+        )}
+      </RN.View>
+      <RN.TouchableOpacity style={styles.iconBtn} onPress={() => openEdit(item)}>
         <Ionicons name="create-outline" size={18} color="#111827" />
-      </TouchableOpacity>
-      <TouchableOpacity style={[styles.iconBtn, { backgroundColor: '#FEE2E2' }]} onPress={() => remove(item.id)}>
+      </RN.TouchableOpacity>
+      <RN.TouchableOpacity style={[styles.iconBtn, { backgroundColor: '#FEE2E2' }]} onPress={() => remove(item.id)}>
         <Ionicons name="trash-outline" size={18} color="#DC2626" />
-      </TouchableOpacity>
-    </View>
+      </RN.TouchableOpacity>
+    </RN.View>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Inventory</Text>
-        <TouchableOpacity style={styles.addBtn} onPress={openNew}>
+    <RN.SafeAreaView style={styles.container}>
+      <RN.View style={styles.header}>
+        <RN.Text style={styles.headerTitle}>Inventory Management</RN.Text>
+        <RN.TouchableOpacity style={styles.addBtn} onPress={() => router.push('/pharmacy/add-inventory')}>
           <Ionicons name="add" size={20} color="#fff" />
-          <Text style={styles.addText}>New</Text>
-        </TouchableOpacity>
-      </View>
+          <RN.Text style={styles.addText}>Add Product</RN.Text>
+        </RN.TouchableOpacity>
+      </RN.View>
 
-      <FlatList
-        data={products}
-        keyExtractor={(i) => i.id}
-        renderItem={Item}
-        contentContainerStyle={{ padding: 16, gap: 12 }}
-      />
+      {loading ? (
+        <RN.ActivityIndicator size="large" color="#7C3AED" style={{ marginTop: 20 }} />
+      ) : (
+        <RN.FlatList
+          data={inventory}
+          keyExtractor={(i) => i.id}
+          renderItem={Item}
+          contentContainerStyle={{ padding: 16, gap: 12 }}
+          ListEmptyComponent={<RN.Text style={styles.emptyText}>No items in inventory.</RN.Text>}
+          onRefresh={fetchData}
+          refreshing={loading}
+        />
+      )}
 
-      <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={() => setModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{editing ? 'Edit Product' : 'Add Product'}</Text>
-            <TextInput style={styles.input} placeholder="Name" placeholderTextColor="#9CA3AF" value={form.name as string} onChangeText={(v) => setForm({ ...form, name: v })} />
-            <TextInput style={styles.input} placeholder="SKU" placeholderTextColor="#9CA3AF" value={form.sku as string} onChangeText={(v) => setForm({ ...form, sku: v })} />
-            <TextInput style={styles.input} placeholder="Category" placeholderTextColor="#9CA3AF" value={form.category as string} onChangeText={(v) => setForm({ ...form, category: v })} />
-            <TextInput style={styles.input} placeholder="Price" placeholderTextColor="#9CA3AF" keyboardType="decimal-pad" value={String(form.price ?? '')} onChangeText={(v) => setForm({ ...form, price: Number(v || 0) })} />
-            <TextInput style={styles.input} placeholder="Stock" placeholderTextColor="#9CA3AF" keyboardType="numeric" value={String(form.stock ?? '')} onChangeText={(v) => setForm({ ...form, stock: Number(v || 0) })} />
-            <TextInput style={styles.input} placeholder="Reorder Level" placeholderTextColor="#9CA3AF" keyboardType="numeric" value={String(form.reorderLevel ?? '')} onChangeText={(v) => setForm({ ...form, reorderLevel: Number(v || 0) })} />
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.saveBtn} onPress={submit}>
-                <Text style={styles.saveText}>{editing ? 'Save' : 'Add'}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </SafeAreaView>
+      <RN.Modal visible={modalVisible} animationType="slide" transparent onRequestClose={() => setModalVisible(false)}>
+        <RN.View style={styles.modalOverlay}>
+          <RN.View style={styles.modalContent}>
+            <RN.Text style={styles.modalTitle}>Edit Inventory</RN.Text>
+            <RN.Text style={styles.editingName}>{editing?.products?.name}</RN.Text>
+
+            <RN.Text style={styles.label}>Stock Quantity</RN.Text>
+            <RN.TextInput style={styles.input} placeholder="Quantity" keyboardType="numeric" value={form.stock_quantity} onChangeText={(v) => setForm({ ...form, stock_quantity: v })} />
+
+            <RN.Text style={styles.label}>Reorder Level</RN.Text>
+            <RN.TextInput style={styles.input} placeholder="Reorder Level" keyboardType="numeric" value={form.reorder_level} onChangeText={(v) => setForm({ ...form, reorder_level: v })} />
+
+            <RN.View style={styles.modalActions}>
+              <RN.TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
+                <RN.Text style={styles.cancelText}>Cancel</RN.Text>
+              </RN.TouchableOpacity>
+              <RN.TouchableOpacity style={styles.saveBtn} onPress={submitEdit}>
+                <RN.Text style={styles.saveText}>Update</RN.Text>
+              </RN.TouchableOpacity>
+            </RN.View>
+          </RN.View>
+        </RN.View>
+      </RN.Modal>
+    </RN.SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const styles = RN.StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   header: { paddingHorizontal: 16, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
   headerTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
@@ -176,14 +196,18 @@ const styles = StyleSheet.create({
   item: { backgroundColor: '#fff', padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 10, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 3 },
   itemName: { fontSize: 16, fontWeight: '700', color: '#111827' },
   itemMeta: { fontSize: 12, color: '#6B7280' },
+  lowStock: { fontSize: 12, color: '#DC2626', fontWeight: '700', marginTop: 4 },
   iconBtn: { backgroundColor: '#EEF2FF', padding: 8, borderRadius: 8 },
+  emptyText: { textAlign: 'center', marginTop: 40, color: '#6B7280' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 16 },
-  modalContent: { backgroundColor: '#fff', borderRadius: 16, padding: 16 },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 12 },
-  input: { backgroundColor: '#F9FAFB', borderColor: '#E5E7EB', borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, color: '#111827' },
-  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 6 },
-  cancelBtn: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, backgroundColor: '#F3F4F6' },
+  modalContent: { backgroundColor: '#fff', borderRadius: 16, padding: 20 },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 8 },
+  editingName: { fontSize: 14, color: '#6B7280', marginBottom: 16 },
+  label: { fontSize: 14, fontWeight: '600', color: '#4B5563', marginBottom: 6 },
+  input: { backgroundColor: '#F9FAFB', borderColor: '#E5E7EB', borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 16, color: '#111827' },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 10 },
+  cancelBtn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, backgroundColor: '#F3F4F6' },
   cancelText: { color: '#374151', fontWeight: '700' },
-  saveBtn: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, backgroundColor: '#7C3AED' },
+  saveBtn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, backgroundColor: '#7C3AED' },
   saveText: { color: '#fff', fontWeight: '700' },
 });

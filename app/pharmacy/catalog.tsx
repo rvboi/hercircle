@@ -1,9 +1,11 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
+import { supabase } from '@/lib/supabase';
 import { Feather } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Image,
@@ -15,67 +17,88 @@ import {
   View,
 } from 'react-native';
 
-const CATALOG_KEY = 'global_product_catalog';
-
-interface CatalogItem { id: string; name: string; category: string; price: number; image?: string; brand?: string; }
-
-const seedCatalog: CatalogItem[] = [
-  { id: '1', name: 'Paracetamol 500mg', category: 'Analgesic', price: 2.49, image: 'https://via.placeholder.com/150', brand: 'ACME' },
-  { id: '2', name: 'Ibuprofen 200mg', category: 'NSAID', price: 3.99, image: 'https://via.placeholder.com/150', brand: 'HealWell' },
-  { id: '3', name: 'Cough Syrup 100ml', category: 'Cold & Flu', price: 5.5, image: 'https://via.placeholder.com/150', brand: 'Soothe' },
-  { id: '4', name: 'Vitamin C 1000mg', category: 'Supplements', price: 8.0, image: 'https://via.placeholder.com/150', brand: 'Immuno' },
-];
-
-async function loadCatalog(): Promise<CatalogItem[]> {
-  const raw = await AsyncStorage.getItem(CATALOG_KEY);
-  return raw ? JSON.parse(raw) : seedCatalog;
+interface Product {
+  id: string;
+  name: string;
+  category?: string;
+  price: number;
+  image_url?: string;
+  description?: string;
 }
 
-export default function ProductCatalogScreen() {
+export default function PharmacyCatalogScreen() {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
-  const [items, setItems] = useState<CatalogItem[]>([]);
+  const [items, setItems] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    (async () => setItems(await loadCatalog()))();
+    fetchProducts();
   }, []);
+
+  const fetchProducts = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('products')
+        .select('*');
+
+      if (error) throw error;
+      setItems(data || []);
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'Failed to load products');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     if (!searchQuery) return items;
     const s = searchQuery.toLowerCase();
-    return items.filter(i => i.name.toLowerCase().includes(s) || i.category.toLowerCase().includes(s) || (i.brand||'').toLowerCase().includes(s));
+    return items.filter(i =>
+      i.name.toLowerCase().includes(s) ||
+      (i.description || '').toLowerCase().includes(s)
+    );
   }, [items, searchQuery]);
 
-  const addToInventory = async (p: CatalogItem) => {
-    // Adds selected product to current pharmacy inventory
-    const auth = JSON.parse((await AsyncStorage.getItem('pharmacy_auth')) || 'null');
-    const stores = JSON.parse((await AsyncStorage.getItem('pharmacy_stores')) || '[]');
-    const s = stores.find((x: any) => x.id === auth?.storeId);
-    if (!s) {
-      Alert.alert('No store found', 'Please add your store details first in Settings.');
-      return;
+  const addToCart = async (p: Product) => {
+    try {
+      const cartJson = await AsyncStorage.getItem('pharmacy_cart');
+      const cart = cartJson ? JSON.parse(cartJson) : [];
+
+      const existingIdx = cart.findIndex((item: any) => item.product_id === p.id);
+
+      if (existingIdx >= 0) {
+        cart[existingIdx].quantity += 1;
+        Alert.alert('Updated', 'Quantity increased in cart.');
+      } else {
+        cart.push({
+          product_id: p.id,
+          name: p.name,
+          price: p.price,
+          image_url: p.image_url,
+          quantity: 1
+        });
+        Alert.alert('Added', 'Product added to cart.');
+      }
+
+      await AsyncStorage.setItem('pharmacy_cart', JSON.stringify(cart));
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'Failed to add to cart.');
     }
-    s.inventory = s.inventory || [];
-    const exists = (s.inventory || []).some((x: any) => x.name === p.name);
-    if (exists) {
-      Alert.alert('Already in inventory', 'This product already exists in your inventory.');
-      return;
-    }
-    s.inventory.unshift({ id: `${Date.now()}`, name: p.name, sku: p.id, price: p.price, stock: 0, reorderLevel: 5, category: p.category });
-    const idx = stores.findIndex((x: any) => x.id === s.id);
-    stores[idx] = s;
-    await AsyncStorage.setItem('pharmacy_stores', JSON.stringify(stores));
-    Alert.alert('Added', `${p.name} has been added to your inventory.`);
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Feather name="chevron-left" size={24} color={Colors.light.textPrimary} />
+          <Feather name="chevron-left" size={24} color={Colors.light.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Product Catalog</Text>
-        <TouchableOpacity onPress={() => router.push('/pharmacy/inventory')}>
-          <Feather name="shopping-cart" size={24} color={Colors.light.textPrimary} />
+        <Text style={styles.headerTitle}>Order Products</Text>
+        <TouchableOpacity onPress={() => router.push('/pharmacy/cart')}>
+          <Feather name="shopping-cart" size={24} color={Colors.light.text} />
         </TouchableOpacity>
       </View>
 
@@ -89,24 +112,35 @@ export default function ProductCatalogScreen() {
         />
       </View>
 
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id}
-        numColumns={2}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.productCard} onPress={() => router.push({ pathname: '/product/[id]', params: { id: item.id } })}>
-            <Image source={{ uri: item.image }} style={styles.productImage} />
-            <Text style={styles.productName}>{item.name}</Text>
-            <Text style={styles.productCategory}>{item.category}</Text>
-            <Text style={styles.productPrice}>${item.price.toFixed(2)}</Text>
-            <TouchableOpacity style={styles.addBtn} onPress={() => addToInventory(item)}>
-              <Feather name="plus" size={16} color="#fff" />
-              <Text style={styles.addBtnText}>Add to Inventory</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        )}
-        contentContainerStyle={styles.list}
-      />
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#7C3AED" />
+        </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => item.id}
+          numColumns={2}
+          contentContainerStyle={styles.list}
+          renderItem={({ item }) => (
+            <View style={styles.productCard}>
+              {item.image_url ? (
+                <Image source={{ uri: item.image_url }} style={styles.productImage} />
+              ) : (
+                <View style={[styles.productImage, { alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F6' }]}>
+                  <Feather name="box" size={32} color="#D1D5DB" />
+                </View>
+              )}
+              <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
+              <Text style={styles.productPrice}>₹{item.price?.toLocaleString()}</Text>
+              <TouchableOpacity style={styles.addBtn} onPress={() => addToCart(item)}>
+                <Feather name="plus" size={16} color="#fff" />
+                <Text style={styles.addBtnText}>Add to Cart</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -121,12 +155,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 20,
+    paddingTop: 50,
     backgroundColor: Colors.light.surface,
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: Colors.light.textPrimary,
+    color: Colors.light.text,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -145,38 +180,52 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   list: {
-    paddingHorizontal: 15,
+    paddingHorizontal: 8,
+    paddingBottom: 20,
   },
   productCard: {
     flex: 1,
     backgroundColor: Colors.light.surface,
     borderRadius: 12,
-    margin: 7.5,
-    padding: 15,
+    margin: 8,
+    padding: 12,
     alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
   },
   productImage: {
-    width: 120,
-    height: 120,
+    width: 100,
+    height: 100,
     borderRadius: 8,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   productName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    color: Colors.light.textPrimary,
+    color: Colors.light.text,
     textAlign: 'center',
-  },
-  productCategory: {
-    fontSize: 12,
-    color: Colors.light.textSecondary,
-    marginVertical: 4,
+    marginBottom: 4,
+    height: 40,
   },
   productPrice: {
     fontSize: 16,
     fontWeight: 'bold',
     color: Colors.light.primary,
+    marginBottom: 8,
   },
-  addBtn: { marginTop: 8, backgroundColor: '#7C3AED', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  addBtnText: { color: '#fff', fontWeight: '700' },
+  addBtn: {
+    backgroundColor: '#7C3AED',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    width: '100%',
+    justifyContent: 'center',
+  },
+  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 });

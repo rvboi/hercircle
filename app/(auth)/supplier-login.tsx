@@ -1,4 +1,5 @@
 import { useAuth } from '@/context/AuthContext';
+import { supabase } from '@/lib/supabase';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -34,39 +35,69 @@ export default function SupplierLoginScreen() {
     }
 
     try {
-      if (role === 'admin') {
-        // Fixed admin login credentials (remove admin self-signup)
-        if (email.trim().toLowerCase() === 'admin@hercircle.com' && password === 'StrongPassword!') {
-          login({ email, role: 'admin', loggedInAt: Date.now() } as any);
-        } else {
-          Alert.alert('Access denied', 'Invalid admin credentials.');
-        }
+      // 1. Authenticate with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password: password,
+      });
+
+      if (authError) {
+        Alert.alert('Login Failed', authError.message);
         return;
       }
 
+      const user = authData.user;
+      let profileData = null;
+      let profileError = null;
+
+      // 2. Check the specific profile table based on role
       if (role === 'distributor') {
-        const approved = JSON.parse((await AsyncStorage.getItem('admin_distributors')) || '[]');
-        const exists = approved.find((d: any) => (d.email || '').toLowerCase() === email.trim().toLowerCase());
-        if (exists) {
-          login({ email, role: 'distributor', loggedInAt: Date.now() } as any);
-        } else {
-          Alert.alert('Pending approval', 'Your distributor account is pending approval or not found.');
+        const { data, error } = await supabase
+          .from('distributor_profiles')
+          .select('*')
+          .eq('email', email.trim().toLowerCase())
+          .single();
+        profileData = data;
+        profileError = error;
+      } else if (role === 'pharmacy') {
+        const { data, error } = await supabase
+          .from('pharmacy_profiles')
+          .select('*')
+          .eq('email', email.trim().toLowerCase())
+          .single();
+        profileData = data;
+        profileError = error;
+      } else if (role === 'admin') {
+        // For admin, we might still use metadata or a specific admin table if it exists
+        // Assuming admin@hercircle.com is the only admin for now as per previous logic
+        // For admin, we might still use metadata or a specific admin table if it exists
+        // Assuming admin@hercircle.com is the only admin for now as per previous logic
+        if (email.trim().toLowerCase() === 'admin@hercircle.com') {
+          login({ id: user.id, email: user.email!, role: 'admin', loggedInAt: Date.now() });
+          return;
         }
+      }
+
+      if (profileError || !profileData) {
+        Alert.alert('Access Denied', `No ${role} profile found for this account.`);
         return;
       }
 
-      if (role === 'pharmacy') {
-        const approved = JSON.parse((await AsyncStorage.getItem('admin_pharmacies')) || '[]');
-        const exists = approved.find((p: any) => (p.owner || '').toLowerCase() === email.trim().toLowerCase());
-        if (exists) {
-          login({ email, role: 'pharmacy', loggedInAt: Date.now() } as any);
-        } else {
-          Alert.alert('Pending approval', 'Your pharmacy account is pending approval or not found.');
-        }
+      // 3. Check approval status from the profile table
+      if (profileData.status !== 'approved') {
+        Alert.alert('Pending Approval', 'Your account is pending admin approval.');
         return;
-
       }
+
+      login({
+        id: user.id,
+        email: user.email!,
+        role: role,
+        loggedInAt: Date.now(),
+      });
+
     } catch (e) {
+      console.error(e);
       Alert.alert('Error', 'An unexpected error occurred while logging in.');
     }
   };

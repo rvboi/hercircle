@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 type AuthData = {
+  id?: string;
   email: string;
   role: 'customer' | 'pharmacy' | 'distributor' | 'admin';
   loggedInAt: number;
@@ -17,8 +18,8 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType>({
   auth: null,
   loading: true,
-  login: () => {},
-  logout: () => {},
+  login: () => { },
+  logout: () => { },
 });
 
 export function useAuth() {
@@ -34,9 +35,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const loadAuthData = async () => {
       try {
-        // Clear local storage on development server start to avoid stale sessions
+        // Persist data during development to maintain mock database state
         if (__DEV__) {
-          await AsyncStorage.clear();
+          await AsyncStorage.removeItem('user_auth');
         }
         const authDataString = await AsyncStorage.getItem('user_auth');
         if (authDataString) {

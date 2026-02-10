@@ -1,15 +1,16 @@
 import { useAuth } from '@/context/AuthContext';
+import { supabase } from '@/lib/supabase';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Alert,
   Dimensions,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -29,7 +30,14 @@ export default function SupplierSignupScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [role, setRole] = useState<Role>('distributor');
-  const [details, setDetails] = useState({ city: '', phone: '' });
+  const [details, setDetails] = useState({
+    city: '',
+    phone: '',
+    tradeName: '',
+    drugLicense: '',
+    contactName: '',
+    state: ''
+  });
   const { login } = useAuth();
 
   const handleSignup = async () => {
@@ -39,23 +47,66 @@ export default function SupplierSignupScreen() {
     }
 
     try {
-      if (role === 'distributor') {
-        const pendingKey = 'admin_pending_distributors';
-        const list = JSON.parse((await AsyncStorage.getItem(pendingKey)) || '[]');
-        list.unshift({ id: `${Date.now()}`, name: companyName, email, phone: details.phone || '', location: details.city || '' });
-        await AsyncStorage.setItem(pendingKey, JSON.stringify(list));
-      } else if (role === 'pharmacy') {
-        const pendingKey = 'admin_pending_pharmacies';
-        const list = JSON.parse((await AsyncStorage.getItem(pendingKey)) || '[]');
-        list.unshift({ id: `${Date.now()}`, name: companyName, owner: email, city: details.city || '', phone: details.phone || '' });
-        await AsyncStorage.setItem(pendingKey, JSON.stringify(list));
+      // 1. Create user in Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password: password,
+        options: {
+          data: {
+            role: role,
+            name: companyName,
+          }
+        }
+      });
+
+      if (authError) {
+        Alert.alert('Signup Failed', authError.message);
+        return;
       }
 
-      Alert.alert('Request submitted', 'Your account is pending admin approval. You will be able to login once approved.', [
+      const user = authData.user;
+      if (!user) throw new Error('User creation failed');
+
+      // 2. Insert into the specific profile table
+      if (role === 'pharmacy') {
+        const { error: profileError } = await supabase
+          .from('pharmacy_profiles')
+          .insert([{
+            user_id: user.id,
+            email: email.trim().toLowerCase(),
+            business_legal_name: companyName,
+            trade_name: details.tradeName || companyName,
+            drug_license: details.drugLicense,
+            contact_name: details.contactName || companyName,
+            contact_mobile: details.phone,
+            city: details.city,
+            state: details.state,
+            role: 'pharmacy',
+            status: 'pending'
+          }]);
+
+        if (profileError) throw profileError;
+      } else {
+        const { error: profileError } = await supabase
+          .from('distributor_profiles')
+          .insert([{
+            id: user.id, // Assuming distributor_profiles uses user id as primary key or has an id field
+            email: email.trim().toLowerCase(),
+            name: companyName,
+            status: 'pending',
+            phone: details.phone,
+            location: details.city
+          }]);
+
+        if (profileError) throw profileError;
+      }
+
+      Alert.alert('Request submitted', 'Your account has been created and is pending admin approval.', [
         { text: 'OK', onPress: () => appRouter.replace('/(auth)/supplier-login') },
       ]);
     } catch (e) {
-      Alert.alert('Error', 'Failed to submit request. Please try again.');
+      console.error(e);
+      Alert.alert('Error', 'Failed to create account. Please try again.');
     }
   };
 
@@ -66,85 +117,108 @@ export default function SupplierSignupScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.content}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Become a Supplier</Text>
-          <Text style={styles.subtitle}>Join our network of pharmacies and distributors.</Text>
-        </View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 40 }}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Become a Supplier</Text>
+            <Text style={styles.subtitle}>Join our network of pharmacies and distributors.</Text>
+          </View>
 
-        <View style={styles.formContainer}>
-          <View style={styles.roleSelectorContainer}>
-            {[
-              { id: 'distributor', label: 'Distributor', icon: 'truck' },
-              { id: 'pharmacy', label: 'Pharmacy', icon: 'home' },
-            ].map((r) => (
-              <TouchableOpacity key={r.id} style={[styles.roleButton, role === (r.id as Role) && styles.roleButtonActive]} onPress={() => setRole(r.id as Role)}>
-                <Feather name={r.icon as any} size={16} color={role === (r.id as Role) ? '#fff' : '#4B5563'} />
-                <Text style={[styles.roleButtonText, role === (r.id as Role) && styles.roleButtonTextActive]}>{r.label}</Text>
+          <View style={styles.formContainer}>
+            <View style={styles.roleSelectorContainer}>
+              {[
+                { id: 'distributor', label: 'Distributor', icon: 'truck' },
+                { id: 'pharmacy', label: 'Pharmacy', icon: 'home' },
+              ].map((r) => (
+                <TouchableOpacity key={r.id} style={[styles.roleButton, role === (r.id as Role) && styles.roleButtonActive]} onPress={() => setRole(r.id as Role)}>
+                  <Feather name={r.icon as any} size={16} color={role === (r.id as Role) ? '#fff' : '#4B5563'} />
+                  <Text style={[styles.roleButtonText, role === (r.id as Role) && styles.roleButtonTextActive]}>{r.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Feather name="briefcase" size={20} color="#6B7280" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder={role === 'pharmacy' ? 'Business Legal Name' : 'Company Name'}
+                placeholderTextColor="#9CA3AF"
+                value={companyName}
+                onChangeText={setCompanyName}
+                autoCapitalize="words"
+              />
+            </View>
+
+            {role === 'pharmacy' && (
+              <>
+                <View style={styles.inputContainer}>
+                  <Feather name="tag" size={20} color="#6B7280" style={styles.inputIcon} />
+                  <TextInput style={styles.input} placeholder="Trade Name" placeholderTextColor="#9CA3AF" value={details.tradeName} onChangeText={(v) => setDetails({ ...details, tradeName: v })} />
+                </View>
+                <View style={styles.inputContainer}>
+                  <Feather name="file-text" size={20} color="#6B7280" style={styles.inputIcon} />
+                  <TextInput style={styles.input} placeholder="Drug License Number" placeholderTextColor="#9CA3AF" value={details.drugLicense} onChangeText={(v) => setDetails({ ...details, drugLicense: v })} />
+                </View>
+                <View style={styles.inputContainer}>
+                  <Feather name="user" size={20} color="#6B7280" style={styles.inputIcon} />
+                  <TextInput style={styles.input} placeholder="Contact Person Name" placeholderTextColor="#9CA3AF" value={details.contactName} onChangeText={(v) => setDetails({ ...details, contactName: v })} />
+                </View>
+              </>
+            )}
+
+            <View style={styles.inputContainer}>
+              <Feather name="map-pin" size={20} color="#6B7280" style={styles.inputIcon} />
+              <TextInput style={styles.input} placeholder="City" placeholderTextColor="#9CA3AF" value={details.city} onChangeText={(v) => setDetails({ ...details, city: v })} />
+            </View>
+
+            {role === 'pharmacy' && (
+              <View style={styles.inputContainer}>
+                <Feather name="map" size={20} color="#6B7280" style={styles.inputIcon} />
+                <TextInput style={styles.input} placeholder="State" placeholderTextColor="#9CA3AF" value={details.state} onChangeText={(v) => setDetails({ ...details, state: v })} />
+              </View>
+            )}
+
+            <View style={styles.inputContainer}>
+              <Feather name="phone" size={20} color="#6B7280" style={styles.inputIcon} />
+              <TextInput style={styles.input} placeholder="Mobile Number" placeholderTextColor="#9CA3AF" keyboardType="phone-pad" value={details.phone} onChangeText={(v) => setDetails({ ...details, phone: v })} />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Feather name="mail" size={20} color="#6B7280" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Business Email"
+                placeholderTextColor="#9CA3AF"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Feather name="lock" size={20} color="#6B7280" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Password"
+                placeholderTextColor="#9CA3AF"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+              />
+              <TouchableOpacity style={styles.eyeButton} onPress={() => setShowPassword(!showPassword)}>
+                <Feather name={showPassword ? 'eye-off' : 'eye'} size={20} color="#6B7280" />
               </TouchableOpacity>
-            ))}
-          </View>
+            </View>
 
-          <View style={styles.inputContainer}>
-            <Feather name="briefcase" size={20} color="#6B7280" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder={role === 'pharmacy' ? 'Pharmacy Name' : 'Company Name'}
-              placeholderTextColor="#9CA3AF"
-              value={companyName}
-              onChangeText={setCompanyName}
-              autoCapitalize="words"
-            />
-          </View>
+            <TouchableOpacity style={styles.primaryButton} onPress={handleSignup}>
+              <Text style={styles.primaryButtonText}>Create Account</Text>
+            </TouchableOpacity>
 
-          {role === 'pharmacy' && (
-            <>
-              <View style={styles.inputContainer}>
-                <Feather name="map-pin" size={20} color="#6B7280" style={styles.inputIcon} />
-                <TextInput style={styles.input} placeholder="City" placeholderTextColor="#9CA3AF" value={details.city} onChangeText={(v) => setDetails({ ...details, city: v })} />
-              </View>
-              <View style={styles.inputContainer}>
-                <Feather name="phone" size={20} color="#6B7280" style={styles.inputIcon} />
-                <TextInput style={styles.input} placeholder="Phone" placeholderTextColor="#9CA3AF" keyboardType="phone-pad" value={details.phone} onChangeText={(v) => setDetails({ ...details, phone: v })} />
-              </View>
-            </>
-          )}
-
-          <View style={styles.inputContainer}>
-            <Feather name="mail" size={20} color="#6B7280" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Business Email"
-              placeholderTextColor="#9CA3AF"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Feather name="lock" size={20} color="#6B7280" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              placeholderTextColor="#9CA3AF"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry={!showPassword}
-            />
-            <TouchableOpacity style={styles.eyeButton} onPress={() => setShowPassword(!showPassword)}>
-              <Feather name={showPassword ? 'eye-off' : 'eye'} size={20} color="#6B7280" />
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+              <Text style={styles.backButtonText}>Already have an account? Sign In</Text>
             </TouchableOpacity>
           </View>
-
-          <TouchableOpacity style={styles.primaryButton} onPress={handleSignup}>
-            <Text style={styles.primaryButtonText}>Create Account</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backButtonText}>Already have an account? Sign In</Text>
-          </TouchableOpacity>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -166,7 +240,6 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    justifyContent: 'center',
     paddingHorizontal: 24,
   },
   header: {
