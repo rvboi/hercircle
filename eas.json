@@ -9,12 +9,10 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal",
-      "packageManager": "npm"
+      "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true,
-      "packageManager": "npm"
+      "autoIncrement": true
     }
   },
   "submit": {
